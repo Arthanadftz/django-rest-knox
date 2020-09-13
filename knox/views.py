@@ -14,7 +14,7 @@ from knox.settings import knox_settings
 
 class LoginView(APIView):
     authentication_classes = api_settings.DEFAULT_AUTHENTICATION_CLASSES
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, )
 
     def get_context(self):
         return {'request': self.request, 'format': self.format_kwarg, 'view': self}
@@ -54,40 +54,50 @@ class LoginView(APIView):
         if token_limit_per_user is not None:
             now = timezone.now()
             token = request.user.auth_token_set.filter(expiry__gt=now)
+            response = {
+                "error": "Maximum amount of tokens allowed per user exceeded."
+            }
             if token.count() >= token_limit_per_user:
                 return Response(
-                    {"error": "Maximum amount of tokens allowed per user exceeded."},
-                    status=status.HTTP_403_FORBIDDEN
+                    response, status=status.HTTP_403_FORBIDDEN
                 )
+
         token_ttl = self.get_token_ttl()
         instance, token = AuthToken.objects.create(request.user, token_ttl)
-        user_logged_in.send(sender=request.user.__class__,
-                            request=request, user=request.user)
-        data = self.get_post_response_data(request, token, instance)
+        user_logged_in.send(
+            sender=request.user.__class__, request=request, user=request.user
+        )
+        data = self.get_post_response_data(
+            request, token, instance
+        )
         return Response(data)
 
 
 class LogoutView(APIView):
-    authentication_classes = (TokenAuthentication,)
-    permission_classes = (IsAuthenticated,)
+    authentication_classes = (TokenAuthentication, )
+    permission_classes = (IsAuthenticated, )
 
     def post(self, request, format=None):
-        request._auth.delete()
-        user_logged_out.send(sender=request.user.__class__,
-                             request=request, user=request.user)
+        token = request._auth
+        token.is_active = False
+        token.save()
+        user_logged_out.send(
+            sender=request.user.__class__, request=request, user=request.user
+        )
         return Response(None, status=status.HTTP_204_NO_CONTENT)
 
 
 class LogoutAllView(APIView):
-    '''
+    """
     Log the user out of all sessions
     I.E. deletes all auth tokens for the user
-    '''
+    """
     authentication_classes = (TokenAuthentication,)
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, format=None):
-        request.user.auth_token_set.all().delete()
-        user_logged_out.send(sender=request.user.__class__,
-                             request=request, user=request.user)
+        request.user.auth_token_set.all().update(is_active=False)
+        user_logged_out.send(
+            sender=request.user.__class__, request=request, user=request.user
+        )
         return Response(None, status=status.HTTP_204_NO_CONTENT)
